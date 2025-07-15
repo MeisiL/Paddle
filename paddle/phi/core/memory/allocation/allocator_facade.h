@@ -123,7 +123,7 @@ class AllocatorFacade {
  private:
   AllocatorFacade();
   AllocatorFacadePrivate* m_;
-#if defined(PADDLE_WITH_CUDA) || defined(PADDLE_WITH_HIP)
+#if defined(PADDLE_WITH_CUDA) || defined(PADDLE_WITH_HIP) || define(PADDLE_WITH_XPU)
   std::unordered_map<int64_t, std::unique_ptr<AllocatorFacadePrivate>>
       cuda_graph_map_;
   std::unordered_map<int64_t, int64_t> cuda_graph_ref_cnt_;

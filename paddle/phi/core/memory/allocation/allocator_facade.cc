@@ -1913,6 +1913,27 @@ void AllocatorFacade::RemoveMemoryPoolOfCUDAGraph(int64_t id) {
 }
 #endif
 #elif defined(PADDLE_WITH_XPU)
+void AllocatorFacade::PrepareMemoryPoolForXPUGraph(int64_t id) {
+  PADDLE_ENFORCE_EQ(GetAllocatorStrategy(),
+                    AllocatorStrategy::kAutoGrowth,
+                    common::errors::InvalidArgument(
+                        "CUDA Graph is only supported when the "
+                        "FLAGS_allocator_strategy=\"auto_growth\", but got "
+                        "FLAGS_allocator_strategy=\"%s\"",
+                        FLAGS_allocator_strategy));
+  auto& allocator = xpu_graph_map_[id];
+  auto& ref_cnt = xpu_graph_ref_cnt_[id];
+  ++ref_cnt;
+
+  if (FLAGS_use_cuda_malloc_async_allocator) return;
+  if (allocator.get() == nullptr) {
+    allocator = std::make_unique<AllocatorFacadePrivate>(
+        /*allow_free_idle_chunk=*/false);
+    VLOG(10) << "Create memory pool for CUDA Graph with memory ID " << id;
+  } else {
+    VLOG(10) << "Use created memory pool for CUDA Graph with memory ID " << id;
+  }
+}
 const std::shared_ptr<Allocator>& AllocatorFacade::GetAllocator(
     const phi::Place& place, XPUStream stream) {
   AllocatorFacadePrivate* m = GetPrivate();
