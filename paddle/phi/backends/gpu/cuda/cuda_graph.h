@@ -585,7 +585,7 @@ using CUDAGraphID = unsigned long long;  // NOLINT
 // NOTE: Currently, we do not support to capture CUDA graph in parallel
 // NOTE: Do not use this class directly because it should be used with
 //       the memory pool.
-class CUDAGraph {
+class XPUGraph {
   DISABLE_COPY_AND_ASSIGN(CUDAGraph);
 
   // Since the constructor would throw error is CUDA_VERSION < 10010.

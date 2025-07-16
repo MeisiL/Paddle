@@ -294,6 +294,39 @@ void BeginCUDAGraphCapture(phi::XPUPlace place,
             .RemoveMemoryPoolOfCUDAGraph(pool_id);
       });
 }
+
+std::unique_ptr<XPUGraph> EndXPUGraphCapture() {
+  auto place = XPUGraph::CapturingPlace();
+  auto pool_id = XPUGraph::CapturingPoolID();
+  auto* mutable_dev_ctx = SelectXPUGraphDeviceContext(place, &pool_id);
+  auto* dev_ctx = reinterpret_cast<phi::XPUContext*>(mutable_dev_ctx);
+
+  auto all_capturing_dev_ctxs =
+      phi::backends::gpu::XPUGraphContextManager::Instance()
+          .GetAllCapturingDeviceContexts();
+  auto num_stream = all_capturing_dev_ctxs.size();
+  if (num_stream > 1) {
+    // join all other streams back to origin cuda graph stream.
+    for (auto all_capturing_dev_ctx : all_capturing_dev_ctxs) {
+      auto* capturing_dev_ctx =
+          reinterpret_cast<phi::XPUContext*>(all_capturing_dev_ctx);
+      std::shared_ptr<platform::DeviceEvent> capturing_event =
+          std::make_shared<platform::DeviceEvent>(
+              capturing_dev_ctx->GetPlace(),
+              platform::GenerateDeviceEventFlag());
+      capturing_event->Record(capturing_dev_ctx);
+      capturing_event->Wait(platform::kCUDA, dev_ctx);
+      VLOG(4) << "CUDA Graph stream eventWait. cuda graph dev_ctx: " << dev_ctx
+              << " wait for capturing dev_ctx: " << capturing_dev_ctx;
+      capturing_dev_ctx->SetXPUGraphAllocator(nullptr);
+    }
+  }
+
+  phi::backends::gpu::XPUGraphContextManager::Instance()
+      .ClearDeviceContextsRecords();
+  dev_ctx->SetXPUGraphAllocator(nullptr);
+  return XPUGraph::EndCapture();
+}
 #endif
 
 
