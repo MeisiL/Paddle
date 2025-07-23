@@ -676,6 +676,17 @@ class AllocatorFacadePrivate {
     }
   }
 
+  void EraseStream(std::shared_ptr<phi::Allocation> allocation,
+                   phi::stream::stream_t stream) {
+    if (auto stream_safe_cuda_allocation =
+            std::dynamic_pointer_cast<StreamSafeXPUDeviceAllocation>(
+                allocation)) {
+      stream_safe_cuda_allocation->EraseStream(stream);
+    } else {
+      VLOG(6) << "EraseStream for a non-StreamSafeCUDAAllocation";
+    }
+  }
+
   XPUStream GetStream(
       const std::shared_ptr<phi::Allocation>& allocation) const {
     const std::shared_ptr<StreamSafeXPUAllocation> stream_safe_xpu_allocation =
@@ -1669,6 +1680,20 @@ AllocatorFacadePrivate* AllocatorFacade::GetPrivate() const {
   if (UNLIKELY(IsCUDAGraphCapturing()) &&
       !FLAGS_use_cuda_malloc_async_allocator) {
     auto id = phi::backends::gpu::CUDAGraph::CapturingPoolID();
+    auto iter = cuda_graph_map_.find(id);
+    PADDLE_ENFORCE_NE(
+        iter,
+        cuda_graph_map_.end(),
+        common::errors::PermissionDenied(
+            "No memory pool is prepared for CUDA Graph capturing."));
+    VLOG(10) << "Choose CUDA Graph memory pool";
+    return iter->second.get();
+  }
+#endif
+#if defined(PADDLE_WITH_XPU)
+  if (UNLIKELY(IsCUDAGraphCapturing()) &&
+      !FLAGS_use_cuda_malloc_async_allocator) {
+    auto id = phi::backends::XPU::CUDAGraph::CapturingPoolID();
     auto iter = cuda_graph_map_.find(id);
     PADDLE_ENFORCE_NE(
         iter,

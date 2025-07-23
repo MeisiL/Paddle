@@ -99,6 +99,7 @@ class AllocatorFacade {
       const phi::Place& place, XPUStream stream);
   bool RecordStream(std::shared_ptr<Allocation> allocation, XPUStream stream);
   void SetDefaultStream(const phi::XPUPlace& place, XPUStream stream);
+  void EraseStream(std::shared_ptr<Allocation> allocation, gpuStream_t stream);
 #endif
 
 #if defined(PADDLE_WITH_CUDA) || defined(PADDLE_WITH_HIP)
