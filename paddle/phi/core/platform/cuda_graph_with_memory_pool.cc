@@ -14,6 +14,7 @@
 
 #include "paddle/phi/core/platform/cuda_graph_with_memory_pool.h"
 
+#include "paddle/phi/backends/xpu/xpu_graph.h"
 #include "paddle/common/flags.h"
 #include "paddle/phi/backends/context_pool.h"
 #include "paddle/phi/core/memory/allocation/allocator_facade.h"
@@ -190,7 +191,7 @@ phi::DeviceContext* SelectXPUGraphDeviceContext(phi::XPUPlace place,
                                                  int64_t* pool_id) {
   phi::DeviceContext* mutable_dev_ctx;
   auto all_capturing_dev_ctxs =
-      phi::backends::gpu::XPUGraphContextManager::Instance()
+      phi::backends::xpu::XPUGraphContextManager::Instance()
           .GetAllCapturingDeviceContexts();
   auto num_stream = all_capturing_dev_ctxs.size();
   if (num_stream > 0) {
@@ -208,11 +209,11 @@ phi::DeviceContext* SelectXPUGraphDeviceContext(phi::XPUPlace place,
     if (num_stream > 1) {
       VLOG(4) << "Use a new stream to capture cuda graph. Used in multi-stream "
                  "scenarios with new executor.";
-      if (*pool_id <= CUDAGraph::kInvalidPoolID) {
-        *pool_id = CUDAGraph::UniqueMemoryPoolID();
+      if (*pool_id <= phi::backends::xpu::XPUGraph::kInvalidPoolID) {
+        *pool_id = phi::backends::xpu::XPUGraph::UniqueMemoryPoolID();
       }
       mutable_dev_ctx =
-          phi::backends::gpu::XPUGraphContextManager::Instance().Get(
+          phi::backends::xpu::XPUGraphContextManager::Instance().Get(
               *pool_id, place, 0);
     } else {
       VLOG(4) << "Use recorded stream to capture cuda graph. Used in "
@@ -227,7 +228,7 @@ phi::DeviceContext* SelectXPUGraphDeviceContext(phi::XPUPlace place,
 }
 
 void BeginCUDAGraphCapture(phi::XPUPlace place,
-                           gpuStreamCaptureMode mode,
+                           phi::backends::xpu::xpuStreamCaptureMode mode,
                            int64_t pool_id) {
   auto* mutable_dev_ctx = SelectXPUGraphDeviceContext(place, &pool_id);
   auto* dev_ctx = reinterpret_cast<phi::XPUContext*>(mutable_dev_ctx);
@@ -236,16 +237,16 @@ void BeginCUDAGraphCapture(phi::XPUPlace place,
       phi::backends::xpu::XPUGraphContextManager::Instance()
           .GetAllCapturingDeviceContexts();
   auto num_stream = all_capturing_dev_ctxs.size();
-  if (num_stream > 1) {
-    for (auto all_capturing_dev_ctx : all_capturing_dev_ctxs) {
-      auto* capturing_dev_ctx =
-          reinterpret_cast<phi::XPUContext*>(all_capturing_dev_ctx);
+  //if (num_stream > 1) {
+    //for (auto all_capturing_dev_ctx : all_capturing_dev_ctxs) {
+      //auto* capturing_dev_ctx =
+        //  reinterpret_cast<phi::XPUContext*>(all_capturing_dev_ctx);
       //InitCUDNNRelatedHandle(capturing_dev_ctx);
-    }
-  }
+    //}
+  //}
 
   auto stream = dev_ctx->stream();
-  XPUGraph::BeginCapture(place, stream, mode);
+  phi::backends::xpu::XPUGraph::BeginCapture(place, stream, mode);
 
   // When using cuda graph in new executor, fast GC must be used.
   // FLAGS_use_stream_safe_cuda_allocator should be true.
@@ -254,8 +255,8 @@ void BeginCUDAGraphCapture(phi::XPUPlace place,
   if (old_value) {
     FLAGS_use_stream_safe_cuda_allocator = false;
   }
-  pool_id = XPUGraph::SetMemoryPoolID(pool_id);
-  memory::allocation::AllocatorFacade::Instance().PrepareMemoryPoolForCUDAGraph(
+  pool_id = phi::backends::xpu::XPUGraph::SetMemoryPoolID(pool_id);
+  memory::allocation::AllocatorFacade::Instance().PrepareMemoryPoolForXPUGraph(
       pool_id);
   dev_ctx->SetCUDAGraphAllocator(memory::allocation::AllocatorFacade::Instance()
                                      .GetAllocator(place)
@@ -274,7 +275,7 @@ void BeginCUDAGraphCapture(phi::XPUPlace place,
 
     for (auto all_capturing_dev_ctx : all_capturing_dev_ctxs) {
       auto* capturing_dev_ctx =
-          reinterpret_cast<phi::GPUContext*>(all_capturing_dev_ctx);
+          reinterpret_cast<phi::XPUContext*>(all_capturing_dev_ctx);
       auto capturing_stream = capturing_dev_ctx->stream();
       capturing_dev_ctx->SetCUDAGraphAllocator(
           memory::allocation::AllocatorFacade::Instance()
@@ -289,20 +290,20 @@ void BeginCUDAGraphCapture(phi::XPUPlace place,
     }
   }
   AddPostResetCallbackIfCapturingCUDAGraph(
-      [=](paddle::optional<const CUDAGraph&> graph) {
+      [=](paddle::optional<const phi::backends::xpu::XPUGraph&> graph) {
         memory::allocation::AllocatorFacade::Instance()
-            .RemoveMemoryPoolOfCUDAGraph(pool_id);
+            .RemoveMemoryPoolOfXPUGraph(pool_id);
       });
 }
 
-std::unique_ptr<XPUGraph> EndXPUGraphCapture() {
-  auto place = XPUGraph::CapturingPlace();
-  auto pool_id = XPUGraph::CapturingPoolID();
+std::unique_ptr<phi::backends::xpu::XPUGraph> EndXPUGraphCapture() {
+  auto place = phi::backends::xpu::XPUGraph::CapturingPlace();
+  auto pool_id = phi::backends::xpu::XPUGraph::CapturingPoolID();
   auto* mutable_dev_ctx = SelectXPUGraphDeviceContext(place, &pool_id);
   auto* dev_ctx = reinterpret_cast<phi::XPUContext*>(mutable_dev_ctx);
 
   auto all_capturing_dev_ctxs =
-      phi::backends::gpu::XPUGraphContextManager::Instance()
+      phi::backends::xpu::XPUGraphContextManager::Instance()
           .GetAllCapturingDeviceContexts();
   auto num_stream = all_capturing_dev_ctxs.size();
   if (num_stream > 1) {
@@ -318,14 +319,14 @@ std::unique_ptr<XPUGraph> EndXPUGraphCapture() {
       capturing_event->Wait(platform::kCUDA, dev_ctx);
       VLOG(4) << "CUDA Graph stream eventWait. cuda graph dev_ctx: " << dev_ctx
               << " wait for capturing dev_ctx: " << capturing_dev_ctx;
-      capturing_dev_ctx->SetXPUGraphAllocator(nullptr);
+      capturing_dev_ctx->SetCUDAGraphAllocator(nullptr);
     }
   }
 
-  phi::backends::gpu::XPUGraphContextManager::Instance()
+  phi::backends::xpu::XPUGraphContextManager::Instance()
       .ClearDeviceContextsRecords();
-  dev_ctx->SetXPUGraphAllocator(nullptr);
-  return XPUGraph::EndCapture();
+  dev_ctx->SetCUDAGraphAllocator(nullptr);
+  return phi::backends::xpu::XPUGraph::EndCapture();
 }
 #endif
 

@@ -66,6 +66,7 @@
 #include "paddle/phi/core/memory/allocation/xpu_allocator.h"
 #include "paddle/phi/core/memory/allocation/xpu_pinned_allocator.h"
 #include "paddle/phi/core/platform/device/xpu/xpu_info.h"
+#include "paddle/phi/backends/xpu/xpu_graph.h"
 #endif
 
 #ifdef PADDLE_WITH_IPU
@@ -679,7 +680,7 @@ class AllocatorFacadePrivate {
   void EraseStream(std::shared_ptr<phi::Allocation> allocation,
                    phi::stream::stream_t stream) {
     if (auto stream_safe_cuda_allocation =
-            std::dynamic_pointer_cast<StreamSafeXPUDeviceAllocation>(
+            std::dynamic_pointer_cast<StreamSafeXPUAllocation>(
                 allocation)) {
       stream_safe_cuda_allocation->EraseStream(stream);
     } else {
@@ -1693,7 +1694,7 @@ AllocatorFacadePrivate* AllocatorFacade::GetPrivate() const {
 #if defined(PADDLE_WITH_XPU)
   if (UNLIKELY(IsCUDAGraphCapturing()) &&
       !FLAGS_use_cuda_malloc_async_allocator) {
-    auto id = phi::backends::XPU::CUDAGraph::CapturingPoolID();
+    auto id = phi::backends::xpu::XPUGraph::CapturingPoolID();
     auto iter = cuda_graph_map_.find(id);
     PADDLE_ENFORCE_NE(
         iter,
@@ -1946,8 +1947,8 @@ void AllocatorFacade::PrepareMemoryPoolForXPUGraph(int64_t id) {
                         "FLAGS_allocator_strategy=\"auto_growth\", but got "
                         "FLAGS_allocator_strategy=\"%s\"",
                         FLAGS_allocator_strategy));
-  auto& allocator = xpu_graph_map_[id];
-  auto& ref_cnt = xpu_graph_ref_cnt_[id];
+  auto& allocator = cuda_graph_map_[id];
+  auto& ref_cnt = cuda_graph_ref_cnt_[id];
   ++ref_cnt;
 
   if (FLAGS_use_cuda_malloc_async_allocator) return;
@@ -1957,6 +1958,24 @@ void AllocatorFacade::PrepareMemoryPoolForXPUGraph(int64_t id) {
     VLOG(10) << "Create memory pool for CUDA Graph with memory ID " << id;
   } else {
     VLOG(10) << "Use created memory pool for CUDA Graph with memory ID " << id;
+  }
+}
+
+
+void AllocatorFacade::RemoveMemoryPoolOfXPUGraph(int64_t id) {
+  auto ref_cnt_iter = cuda_graph_ref_cnt_.find(id);
+  PADDLE_ENFORCE_NE(ref_cnt_iter,
+                    cuda_graph_ref_cnt_.end(),
+                    common::errors::InvalidArgument(
+                        "Cannot find CUDA Graph with memory ID = %d", id));
+  auto& ref_cnt = ref_cnt_iter->second;
+  --ref_cnt;
+  if (ref_cnt == 0) {
+    cuda_graph_map_.erase(id);
+    cuda_graph_ref_cnt_.erase(ref_cnt_iter);
+  } else {
+    VLOG(10) << "Decrease memory pool ID " << id << " reference count to be "
+             << ref_cnt;
   }
 }
 const std::shared_ptr<Allocator>& AllocatorFacade::GetAllocator(
